@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Painel de Cruzamento — Portabilidade / Migração / Ultrafibra</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --ink: #14202b;
+    --paper: #f6f4ee;
+    --panel: #ffffff;
+    --line: #dcd6c8;
+    --accent: #1f6f5c;
+    --accent-dark: #144a3d;
+    --amber: #b5762b;
+    --red: #a13d3d;
+    --muted: #6b6f66;
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', 'Segoe UI', Arial, sans-serif;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 3px solid var(--ink);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  header.top h1 {
+    font-size: 22px;
+    letter-spacing: 0.02em;
+    margin: 0 0 4px;
+    font-weight: 700;
+  }
+  header.top p { margin: 0; color: var(--muted); font-size: 13px; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent-dark);
+    border: 1px solid var(--accent);
+    padding: 3px 8px;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+  }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--muted);
+    transition: all .15s;
+  }
+  .tab.active {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .tab:hover:not(.active) { border-color: var(--accent); color: var(--accent-dark); }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 16px;
+    font-weight: 700;
+  }
+
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 180px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  select, input[type=file], input[type=number] {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  input[type=file] { padding: 7px; cursor: pointer; }
+
+  .upload-box {
+    border: 1.5px dashed var(--line);
+    padding: 16px;
+    background: #fbfaf6;
+  }
+  .upload-box.filled { border-color: var(--accent); background: #f1f7f4; }
+  .upload-box .fname { font-family: var(--mono); font-size: 12px; color: var(--accent-dark); margin-top: 6px; word-break: break-all; }
+
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 13px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+    margin-top: 20px;
+  }
+  button.primary:hover { background: var(--accent-dark); }
+  button.primary:disabled { background: #b7b7ac; cursor: not-allowed; }
+
+  .log {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--ink);
+    color: #cfead9;
+    padding: 14px 16px;
+    margin-top: 16px;
+    display: none;
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  .log.show { display: block; }
+  .log .warn { color: #e8c37a; }
+  .log .err { color: #e88a8a; }
+  .log .ok { color: #7fd6a0; }
+
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+  .stat {
+    flex: 1;
+    min-width: 140px;
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf6;
+  }
+  .stat .n { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+  .stat .l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 2px; }
+  .stat.accent .n { color: var(--accent-dark); }
+  .stat.amber .n { color: var(--amber); }
+
+  .downloads { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+  .dl-btn {
+    flex: 1;
+    min-width: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1.5px solid var(--ink);
+    background: #fff;
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 14px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .dl-btn:hover { background: var(--ink); color: #fff; }
+  .dl-btn .count { font-family: var(--mono); font-weight: 400; font-size: 12px; opacity: 0.75; }
+
+  .note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    border-left: 3px solid var(--line);
+    padding-left: 10px;
+  }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Cruzamento de Faturas × Clientes</h1>
+      <p>Portabilidade, Migração e Ultrafibra — processamento local, seus arquivos não saem do navegador</p>
+    </div>
+    <span class="badge">v1</span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="pm">Portabilidade / Migração</div>
+    <div class="tab" data-tab="fibra">Ultrafibra</div>
+  </div>
+
+  <!-- ================= PORTABILIDADE / MIGRAÇÃO ================= -->
+  <div class="panel active" id="panel-pm">
+
+    <div class="card">
+      <h2>1. Safra</h2>
+      <div class="row">
+        <div class="field">
+          <label>Mês da safra</label>
+          <select id="pm-mes">
+            <option value="0">Janeiro</option><option value="1">Fevereiro</option>
+            <option value="2">Março</option><option value="3" selected>Abril</option>
+            <option value="4">Maio</option><option value="5">Junho</option>
+            <option value="6">Julho</option><option value="7">Agosto</option>
+            <option value="8">Setembro</option><option value="9">Outubro</option>
+            <option value="10">Novembro</option><option value="11">Dezembro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Ano da safra</label>
+          <input type="number" id="pm-ano" value="2026" min="2020" max="2035">
+        </div>
+      </div>
+      <p class="note">Só entram no relatório clientes cuja <strong>data de ativação</strong> caia dentro deste mês/ano. A data de corte é calculada automaticamente como o último dia de (mês da safra + 3): ex. Abril → 31/07, Maio → 31/08.</p>
+    </div>
+
+    <div class="card">
+      <h2>2. Arquivos</h2>
+      <div class="row">
+        <div class="field">
+          <label>Arquivo de faturas (.csv — export "Analítico")</label>
+          <div class="upload-box" id="pm-box-fatura">
+            <input type="file" id="pm-file-fatura" accept=".csv">
+            <div class="fname" id="pm-fname-fatura"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Arquivo de clientes / conectadas (.xls ou .xlsx)</label>
+          <div class="upload-box" id="pm-box-cliente">
+            <input type="file" id="pm-file-cliente" accept=".xls,.xlsx">
+            <div class="fname" id="pm-fname-cliente"></div>
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="pm-btn" disabled>Processar safra</button>
+      <div class="log" id="pm-log"></div>
+    </div>
+
+    <div class="card hidden" id="pm-results">
+      <h2>3. Resultado</h2>
+      <div class="stats" id="pm-stats"></div>
+      <div class="downloads" id="pm-downloads"></div>
+    </div>
+
+  </div>
+
+  <!-- ================= ULTRAFIBRA ================= -->
+  <div class="panel" id="panel-fibra">
+
+    <div class="card">
+      <h2>Arquivos</h2>
+      <p class="note" style="margin-top:0 0 14px">Fibra não é separada por safra — envie o histórico completo de faturas e o arquivo de vendas/conectadas. A safra de cada cliente é calculada automaticamente pela data de ativação, e a data de corte considera qualquer fatura (das últimas 4) paga com mais de 30 dias de atraso.</p>
+      <div class="row">
+        <div class="field">
+          <label>Arquivo de faturas Fibra (.csv — export "Analítico")</label>
+          <div class="upload-box" id="fb-box-fatura">
+            <input type="file" id="fb-file-fatura" accept=".csv">
+            <div class="fname" id="fb-fname-fatura"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Arquivo de vendas / conectadas Fibra (.xlsx)</label>
+          <div class="upload-box" id="fb-box-cliente">
+            <input type="file" id="fb-file-cliente" accept=".xls,.xlsx">
+            <div class="fname" id="fb-fname-cliente"></div>
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="fb-btn" disabled>Processar Fibra</button>
+      <div class="log" id="fb-log"></div>
+    </div>
+
+    <div class="card hidden" id="fb-results">
+      <h2>Resultado</h2>
+      <div class="stats" id="fb-stats"></div>
+      <div class="downloads" id="fb-downloads"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const FATURA_COLS = ['cpf','nome','data_ativacao','safra','produto','portabilidade','numero_portado','numero_linha','acesso','status_do_acesso',
+  'status_fatura_1','vencimento_fatura_1','valor_fatura_1',
+  'status_fatura_2','vencimento_fatura_2','valor_fatura_2',
+  'status_fatura_3','vencimento_fatura_3','valor_fatura_3',
+  'status_fatura_4','vencimento_fatura_4','valor_fatura_4',
+  'data_corte'];
+
+// ---------- tabs ----------
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+}));
+
+// ---------- helpers ----------
+function parseBRDate(str) {
+  if (!str || typeof str !== 'string') return null;
+  const m = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[3], +m[2]-1, +m[1]));
+  return isNaN(d) ? null : d;
+}
+function parsePrice(v) {
+  if (v === null || v === undefined || v === '') return null;
+  let s = String(v).replace('R$', '').trim();
+  s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+function padCpf(cpf) {
+  if (cpf === null || cpf === undefined) return '';
+  const digits = String(cpf).trim().replace(/\D/g, '');
+  return digits ? digits.padStart(11, '0') : '';
+}
+function fmtDate(d) {
+  if (!(d instanceof Date) || isNaN(d)) return '';
+  return String(d.getUTCDate()).padStart(2,'0') + '/' + String(d.getUTCMonth()+1).padStart(2,'0') + '/' + d.getUTCFullYear();
+}
+function lastDayOfMonthPlus3(month0, year) {
+  return new Date(Date.UTC(year, month0 + 4, 0));
+}
+function extractFaturas(row) {
+  const out = [];
+  for (let i=1;i<=4;i++) {
+    const suf = ['1ª','2ª','3ª','4ª'][i-1];
+    out.push({
+      status: (row[`${suf} fatura - Status da fatura`] || '').trim(),
+      vencimento: parseBRDate(row[`${suf} fatura - Data de vencimento`]),
+      valor: parsePrice(row[`${suf} fatura - Preço da fatura`]),
+      diasAtraso: row[`${suf} fatura - Dias de atraso`] !== undefined && row[`${suf} fatura - Dias de atraso`] !== '' ? parseFloat(row[`${suf} fatura - Dias de atraso`]) : null,
+    });
+  }
+  return out;
+}
+function faturaFieldsToRow(faturas) {
+  const o = {};
+  faturas.forEach((f,i) => {
+    const n = i+1;
+    o[`status_fatura_${n}`] = f.status || '';
+    o[`vencimento_fatura_${n}`] = f.vencimento ? fmtDate(f.vencimento) : '';
+    o[`valor_fatura_${n}`] = (f.valor === null || f.valor === undefined) ? '' : f.valor;
+  });
+  return o;
+}
+function parseCSV(file) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: reject,
+    });
+  });
+}
+function parseWorkbookFirstSheet(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(ws, {defval:''}));
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+function buildXlsxBlob(rows, columns) {
+  const ws = XLSX.utils.json_to_sheet(rows, {header: columns});
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Dados');
+  const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  return new Blob([out], {type: 'application/octet-stream'});
+}
+function makeDownloadButton(container, label, blob, filename, count) {
+  const a = document.createElement('a');
+  a.className = 'dl-btn';
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.innerHTML = `<span>⬇ ${label}</span><span class="count">${count} linhas</span>`;
+  container.appendChild(a);
+}
+function log(el, msg, cls) {
+  el.classList.add('show');
+  const span = document.createElement('div');
+  if (cls) span.className = cls;
+  span.textContent = msg;
+  el.appendChild(span);
+}
+function clearLog(el) { el.innerHTML = ''; el.classList.remove('show'); }
+
+function wireUpload(inputId, boxId, fnameId, onReady) {
+  const input = document.getElementById(inputId);
+  input.addEventListener('change', () => {
+    if (input.files[0]) {
+      document.getElementById(boxId).classList.add('filled');
+      document.getElementById(fnameId).textContent = input.files[0].name;
+    }
+    onReady();
+  });
+}
+
+// ================= PORTABILIDADE / MIGRAÇÃO =================
+let pmFaturaFile = null, pmClienteFile = null;
+wireUpload('pm-file-fatura','pm-box-fatura','pm-fname-fatura', checkPmReady);
+wireUpload('pm-file-cliente','pm-box-cliente','pm-fname-cliente', checkPmReady);
+function checkPmReady() {
+  pmFaturaFile = document.getElementById('pm-file-fatura').files[0];
+  pmClienteFile = document.getElementById('pm-file-cliente').files[0];
+  document.getElementById('pm-btn').disabled = !(pmFaturaFile && pmClienteFile);
+}
+
+document.getElementById('pm-btn').addEventListener('click', async () => {
+  const logEl = document.getElementById('pm-log');
+  clearLog(logEl);
+  document.getElementById('pm-results').classList.add('hidden');
+  const btn = document.getElementById('pm-btn');
+  btn.disabled = true; btn.textContent = 'Processando...';
+
+  const safraMonth = parseInt(document.getElementById('pm-mes').value, 10);
+  const safraYear = parseInt(document.getElementById('pm-ano').value, 10);
+  const safraLabel = `${MESES[safraMonth]}/${safraYear}`;
+
+  try {
+    log(logEl, `Lendo arquivo de faturas...`);
+    const faturaRows = await parseCSV(pmFaturaFile);
+    if (!faturaRows.length || !('Número de acesso' in faturaRows[0])) {
+      throw new Error('O arquivo de faturas não parece ter a coluna "Número de acesso". Confira se é o export correto.');
+    }
+    const faturaMap = {};
+    for (const r of faturaRows) {
+      const acesso = String(r['Número de acesso']||'').trim();
+      if (acesso) faturaMap[acesso] = r;
+    }
+    log(logEl, `  ${faturaRows.length} linhas de fatura carregadas (${Object.keys(faturaMap).length} acessos únicos).`, 'ok');
+
+    log(logEl, `Lendo arquivo de clientes...`);
+    const clientRows = await parseWorkbookFirstSheet(pmClienteFile);
+    if (!clientRows.length || !('CPF' in clientRows[0]) || !('DATA_ATIVACAO' in clientRows[0])) {
+      throw new Error('O arquivo de clientes não parece ter as colunas CPF/DATA_ATIVACAO esperadas.');
+    }
+    log(logEl, `  ${clientRows.length} linhas de clientes carregadas.`, 'ok');
+
+    const filtered = clientRows.filter(c => {
+      const d = c['DATA_ATIVACAO'];
+      return d instanceof Date && !isNaN(d) && d.getUTCMonth() === safraMonth && d.getUTCFullYear() === safraYear;
+    });
+    log(logEl, `Filtrando por safra ${safraLabel}: ${filtered.length} de ${clientRows.length} ficaram (fora da safra foram excluídos).`);
+    if (!filtered.length) {
+      log(logEl, `  Nenhum cliente encontrado nesta safra. Confira se o mês/ano selecionado bate com o arquivo enviado.`, 'warn');
+    }
+
+    const cutoff = fmtDate(lastDayOfMonthPlus3(safraMonth, safraYear));
+
+    const portabilidadeRows = [], migracaoRows = [];
+    let matched = 0;
+    for (const c of filtered) {
+      const acesso = String(c['TELEFONE_PORTADO']||'').trim();
+      const numeroLinhaRaw = c['NUMERO_LINHA'];
+      const numeroLinha = (numeroLinhaRaw !== undefined && numeroLinhaRaw !== null && String(numeroLinhaRaw).trim() !== '') ? String(numeroLinhaRaw).trim() : '';
+      const isPortabilidade = !!numeroLinha;
+      const fat = faturaMap[acesso];
+      if (fat) matched++;
+      const faturas = fat ? extractFaturas(fat) : extractFaturas({});
+
+      const row = {
+        cpf: padCpf(c['CPF']),
+        nome: c['NOME'] || '',
+        data_ativacao: fmtDate(c['DATA_ATIVACAO']),
+        safra: safraLabel,
+        produto: isPortabilidade ? 'Portabilidade' : 'Migração',
+        portabilidade: isPortabilidade ? 'Sim' : 'Não',
+        numero_portado: isPortabilidade ? acesso : '',
+        numero_linha: isPortabilidade ? numeroLinha : '',
+        acesso: acesso,
+        status_do_acesso: fat ? (fat['Status do número de acesso']||'') : '',
+        ...faturaFieldsToRow(faturas),
+        data_corte: cutoff,
+      };
+      (isPortabilidade ? portabilidadeRows : migracaoRows).push(row);
+    }
+
+    log(logEl, `Cruzamento concluído: ${matched} de ${filtered.length} encontraram fatura correspondente (${filtered.length-matched} ainda sem fatura emitida).`, matched < filtered.length ? 'warn' : 'ok');
+    log(logEl, `Portabilidade: ${portabilidadeRows.length} · Migração: ${migracaoRows.length}`, 'ok');
+    log(logEl, `Data de corte da safra ${safraLabel}: ${cutoff}`, 'ok');
+
+    // stats
+    const statsEl = document.getElementById('pm-stats');
+    statsEl.innerHTML = '';
+    const stats = [
+      [filtered.length, 'Total na safra'],
+      [portabilidadeRows.length, 'Portabilidade'],
+      [migracaoRows.length, 'Migração'],
+      [filtered.length-matched, 'Sem fatura ainda'],
+    ];
+    stats.forEach(([n,l],i) => {
+      const d = document.createElement('div');
+      d.className = 'stat' + (i<3?' accent':' amber');
+      d.innerHTML = `<div class="n">${n}</div><div class="l">${l}</div>`;
+      statsEl.appendChild(d);
+    });
+
+    const dlEl = document.getElementById('pm-downloads');
+    dlEl.innerHTML = '';
+    if (portabilidadeRows.length) {
+      const blob = buildXlsxBlob(portabilidadeRows, FATURA_COLS);
+      makeDownloadButton(dlEl, `Portabilidade — ${safraLabel}`, blob, `portabilidade_${MESES[safraMonth]}_${safraYear}.xlsx`, portabilidadeRows.length);
+    }
+    if (migracaoRows.length) {
+      const blob = buildXlsxBlob(migracaoRows, FATURA_COLS);
+      makeDownloadButton(dlEl, `Migração — ${safraLabel}`, blob, `migracao_${MESES[safraMonth]}_${safraYear}.xlsx`, migracaoRows.length);
+    }
+    document.getElementById('pm-results').classList.remove('hidden');
+
+  } catch (err) {
+    log(logEl, 'Erro: ' + err.message, 'err');
+    console.error(err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Processar safra';
+  }
+});
+
+// ================= ULTRAFIBRA =================
+let fbFaturaFile = null, fbClienteFile = null;
+wireUpload('fb-file-fatura','fb-box-fatura','fb-fname-fatura', checkFbReady);
+wireUpload('fb-file-cliente','fb-box-cliente','fb-fname-cliente', checkFbReady);
+function checkFbReady() {
+  fbFaturaFile = document.getElementById('fb-file-fatura').files[0];
+  fbClienteFile = document.getElementById('fb-file-cliente').files[0];
+  document.getElementById('fb-btn').disabled = !(fbFaturaFile && fbClienteFile);
+}
+
+document.getElementById('fb-btn').addEventListener('click', async () => {
+  const logEl = document.getElementById('fb-log');
+  clearLog(logEl);
+  document.getElementById('fb-results').classList.add('hidden');
+  const btn = document.getElementById('fb-btn');
+  btn.disabled = true; btn.textContent = 'Processando...';
+
+  try {
+    log(logEl, `Lendo arquivo de faturas Fibra...`);
+    const faturaRows = await parseCSV(fbFaturaFile);
+    if (!faturaRows.length || !('Número de acesso' in faturaRows[0])) {
+      throw new Error('O arquivo de faturas não parece ter a coluna "Número de acesso".');
+    }
+    const faturaMap = {};
+    for (const r of faturaRows) {
+      const acesso = String(r['Número de acesso']||'').trim();
+      if (acesso) faturaMap[acesso] = r;
+    }
+    log(logEl, `  ${faturaRows.length} linhas de fatura carregadas.`, 'ok');
+
+    log(logEl, `Lendo arquivo de vendas/conectadas Fibra...`);
+    const clientRows = await parseWorkbookFirstSheet(fbClienteFile);
+    if (!clientRows.length || !('Numero OS' in clientRows[0])) {
+      throw new Error('O arquivo de vendas não parece ter a coluna "Numero OS".');
+    }
+    log(logEl, `  ${clientRows.length} linhas de vendas carregadas.`, 'ok');
+
+    const outRows = [];
+    let comCorte = 0;
+    let semData = 0;
+    for (const c of clientRows) {
+      const os = String(c['Numero OS']||'').trim();
+      if (!os) continue;
+      const fat = faturaMap[os];
+      if (!fat) continue; // sem fatura -> não entra no relatório
+
+      const dataAtiv = fat['Data da ativação'] ? parseBRDate(fat['Data da ativação']) : null;
+      const dataConectada = c['Data Conectada'] instanceof Date ? c['Data Conectada'] : null;
+      const dataFinal = dataConectada || dataAtiv;
+      if (!dataFinal) semData++;
+      const safra = dataFinal ? `${MESES[dataFinal.getUTCMonth()]}/${dataFinal.getUTCFullYear()}` : '';
+
+      const faturas = extractFaturas(fat);
+      let dataCorte = '';
+      for (const f of faturas) {
+        if (f.status === 'Paga' && f.diasAtraso !== null && f.diasAtraso > 30 && f.vencimento) {
+          const d = new Date(f.vencimento);
+          d.setUTCDate(d.getUTCDate() + 30);
+          dataCorte = fmtDate(d);
+          comCorte++;
+          break;
+        }
+      }
+
+      outRows.push({
+        cpf: padCpf(c['CPF']),
+        nome: c['Cliente'] || '',
+        data_ativacao: fmtDate(dataFinal),
+        safra: safra,
+        produto: 'Fibra',
+        portabilidade: 'Não',
+        numero_portado: '',
+        numero_linha: '',
+        acesso: os,
+        status_do_acesso: fat['Status do número de acesso'] || '',
+        ...faturaFieldsToRow(faturas),
+        data_corte: dataCorte,
+      });
+    }
+
+    log(logEl, `Cruzamento concluído: ${outRows.length} clientes Fibra com fatura encontrada.`, 'ok');
+    if (semData) log(logEl, `  ${semData} registros sem data de ativação identificável (safra ficou em branco).`, 'warn');
+    log(logEl, `${comCorte} entraram em data de corte (fatura paga com mais de 30 dias de atraso).`, comCorte ? 'warn' : 'ok');
+
+    const statsEl = document.getElementById('fb-stats');
+    statsEl.innerHTML = '';
+    const stats = [
+      [outRows.length, 'Total processado'],
+      [comCorte, 'Em data de corte'],
+      [clientRows.length - outRows.length, 'Sem fatura / não conectados'],
+    ];
+    stats.forEach(([n,l],i) => {
+      const d = document.createElement('div');
+      d.className = 'stat' + (i===1?' amber':' accent');
+      d.innerHTML = `<div class="n">${n}</div><div class="l">${l}</div>`;
+      statsEl.appendChild(d);
+    });
+
+    const dlEl = document.getElementById('fb-downloads');
+    dlEl.innerHTML = '';
+    if (outRows.length) {
+      const blob = buildXlsxBlob(outRows, FATURA_COLS);
+      const today = new Date();
+      makeDownloadButton(dlEl, 'Fibra — base completa', blob, `fibra_${fmtDate(today).replace(/\//g,'-')}.xlsx`, outRows.length);
+    }
+    document.getElementById('fb-results').classList.remove('hidden');
+
+  } catch (err) {
+    log(logEl, 'Erro: ' + err.message, 'err');
+    console.error(err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Processar Fibra';
+  }
+});
+</script>
+</body>
+</html>
