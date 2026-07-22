@@ -267,7 +267,7 @@
 
     <div class="card">
       <h2>Arquivos</h2>
-      <p class="note" style="margin-top:0 0 14px">Fibra não é separada por safra — envie o histórico completo de faturas e o arquivo de vendas/conectadas. A safra de cada cliente é calculada automaticamente pela data de ativação, e a data de corte considera qualquer fatura (das últimas 4) paga com mais de 30 dias de atraso.</p>
+      <p class="note" style="margin-top:0 0 14px">Fibra não é separada por safra — envie o histórico completo de faturas e o arquivo de vendas/conectadas. A safra de cada cliente é calculada automaticamente pela data de ativação, e a data de corte é o último vencimento de fatura do cliente + 30 dias.</p>
       <div class="row">
         <div class="field">
           <label>Arquivo de faturas Fibra (.csv — export "Analítico")</label>
@@ -601,14 +601,17 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
       const faturasDisplay = extractFaturas(fat, 4);
       const faturasTodas = extractFaturas(fat, 6); // corte olha todas as faturas disponíveis, não só as 4 exibidas
       let dataCorte = '';
+      let ultimoVencimento = null;
       for (const f of faturasTodas) {
-        if (f.status === 'Paga' && f.diasAtraso !== null && f.diasAtraso > 30 && f.vencimento) {
-          const d = new Date(f.vencimento);
-          d.setUTCDate(d.getUTCDate() + 30);
-          dataCorte = fmtDate(d);
-          comCorte++;
-          break;
+        if (f.vencimento && (!ultimoVencimento || f.vencimento > ultimoVencimento)) {
+          ultimoVencimento = f.vencimento;
         }
+      }
+      if (ultimoVencimento) {
+        const d = new Date(ultimoVencimento);
+        d.setUTCDate(d.getUTCDate() + 30);
+        dataCorte = fmtDate(d);
+        comCorte++;
       }
 
       outRows.push({
@@ -629,7 +632,7 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
 
     log(logEl, `Cruzamento concluído: ${outRows.length} clientes Fibra com fatura encontrada.`, 'ok');
     if (semData) log(logEl, `  ${semData} registros sem data de ativação identificável (safra ficou em branco).`, 'warn');
-    log(logEl, `${comCorte} entraram em data de corte (fatura paga com mais de 30 dias de atraso).`, comCorte ? 'warn' : 'ok');
+    log(logEl, `${comCorte} tiveram data de corte calculada (último vencimento de fatura + 30 dias).`, comCorte ? 'warn' : 'ok');
 
     const statsEl = document.getElementById('fb-stats');
     statsEl.innerHTML = '';
