@@ -342,10 +342,13 @@ function fmtDate(d) {
 function lastDayOfMonthPlus3(month0, year) {
   return new Date(Date.UTC(year, month0 + 4, 0));
 }
-function extractFaturas(row) {
+const FATURA_SUFIXOS = ['1ª','2ª','3ª','4ª','5ª','6ª'];
+
+function extractFaturas(row, n) {
+  const count = n || 4;
   const out = [];
-  for (let i=1;i<=4;i++) {
-    const suf = ['1ª','2ª','3ª','4ª'][i-1];
+  for (let i=1;i<=count;i++) {
+    const suf = FATURA_SUFIXOS[i-1];
     out.push({
       status: (row[`${suf} fatura - Status da fatura`] || '').trim(),
       vencimento: parseBRDate(row[`${suf} fatura - Data de vencimento`]),
@@ -595,9 +598,10 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
       if (!dataFinal) semData++;
       const safra = dataFinal ? `${MESES[dataFinal.getUTCMonth()]}/${dataFinal.getUTCFullYear()}` : '';
 
-      const faturas = extractFaturas(fat);
+      const faturasDisplay = extractFaturas(fat, 4);
+      const faturasTodas = extractFaturas(fat, 6); // corte olha todas as faturas disponíveis, não só as 4 exibidas
       let dataCorte = '';
-      for (const f of faturas) {
+      for (const f of faturasTodas) {
         if (f.status === 'Paga' && f.diasAtraso !== null && f.diasAtraso > 30 && f.vencimento) {
           const d = new Date(f.vencimento);
           d.setUTCDate(d.getUTCDate() + 30);
@@ -618,7 +622,7 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
         numero_linha: '',
         acesso: os,
         status_do_acesso: fat['Status do número de acesso'] || '',
-        ...faturaFieldsToRow(faturas),
+        ...faturaFieldsToRow(faturasDisplay),
         data_corte: dataCorte,
       });
     }
