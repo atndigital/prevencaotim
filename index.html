@@ -300,6 +300,22 @@
 
 <script>
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// Remove acentos e normaliza para minúsculas, pois o arquivo de clientes traz
+// valores como "Portabilidade Concluida" / "Portabilidade nao Concluida" (sem acento).
+function normalizeText(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+// Deriva o status de portabilidade a partir da coluna PORTABILIDADE do arquivo
+// de clientes, retornando "Concluída" / "Não concluída" (ou '' se não informado).
+function portabilidadeStatus(rawValue) {
+  const t = normalizeText(rawValue);
+  if (!t) return '';
+  if (t.includes('nao concluida')) return 'Não concluída';
+  if (t.includes('concluida')) return 'Concluída';
+  return '';
+}
 const FATURA_COLS = ['cpf','nome','data_ativacao','safra','produto','portabilidade','numero_portado','numero_linha','acesso','status_do_acesso',
   'status_fatura_1','vencimento_fatura_1','valor_fatura_1',
   'status_fatura_2','vencimento_fatura_2','valor_fatura_2',
@@ -499,7 +515,7 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
         data_ativacao: fmtDate(c['DATA_ATIVACAO']),
         safra: safraLabel,
         produto: isPortabilidade ? 'Portabilidade' : 'Migração',
-        portabilidade: isPortabilidade ? 'Sim' : 'Não',
+        portabilidade: isPortabilidade ? portabilidadeStatus(c['PORTABILIDADE']) : '',
         numero_portado: isPortabilidade ? acesso : '',
         numero_linha: isPortabilidade ? numeroLinha : '',
         acesso: acesso,
