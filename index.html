@@ -427,6 +427,14 @@ function normalizeAcesso(v) {
 // Extrai até n faturas do formato do Relatório de Inadimplência (Radar), que usa
 // NB_VLR_FATURA_i / dat_vencimento_faturai / dat_pg_faturai / dias_atraso_faturai /
 // tipo_pgto_faturai (esse último só existe para as faturas 1 e 2 no export).
+// Valores do Relatório de Inadimplência já vêm como número puro do Excel (ex: 5.64),
+// não como texto formatado "R$ 1.234,56" — não pode passar pelo parsePrice (que é
+// para strings no padrão BR e removeria o ponto decimal, multiplicando por 100).
+function parseNumeric(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  return parsePrice(v);
+}
 function extractFaturasRadar(row, n) {
   const count = n || 4;
   const out = [];
@@ -449,11 +457,7 @@ function extractFaturasRadar(row, n) {
       status = diasAtraso && diasAtraso > 0 ? 'Em aberto' : 'Aberta';
     }
 
-    out.push({
-      status: status,
-      vencimento: venc,
-      valor: parsePrice(row[`NB_VLR_FATURA_${i}`]),
-    });
+    out.push({ status: status, vencimento: venc, valor: parseNumeric(row[`NB_VLR_FATURA_${i}`]) });
   }
   return out;
 }
@@ -806,7 +810,7 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
     log(logEl, `  ${clientRows.length} linhas de clientes carregadas. Não separa por safra — processando tudo junto.`, 'ok');
 
     const portabilidadeRows = [], migracaoRows = [];
-    let matched = 0, semData = 0;
+    let matched = 0, semData = 0, faturasAntesAtivacao = 0;
     for (const c of clientRows) {
       const acesso = String(c['TELEFONE_PORTADO']||'').trim();
       const numeroLinhaRaw = c['NUMERO_LINHA'];
@@ -817,12 +821,22 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
       let fat = faturaMap[acesso];
       if (!fat && numeroLinha) fat = faturaMap[numeroLinha];
       if (fat) matched++;
-      const faturas = fat ? extractFaturasRadar(fat) : extractFaturasRadar({});
 
       // Safra e data de corte calculadas por cliente (não há seleção manual):
       // safra = mês/ano da própria DATA_ATIVACAO; corte = último dia desse mês + 3.
       const dataAtiv = c['DATA_ATIVACAO'] instanceof Date && !isNaN(c['DATA_ATIVACAO']) ? c['DATA_ATIVACAO'] : null;
       if (!dataAtiv) semData++;
+
+      // Descarta faturas com vencimento anterior à data de ativação (cobrança de
+      // período antes da linha existir/ser portada não entra no relatório).
+      let faturasBrutas = fat ? extractFaturasRadar(fat, 6) : [];
+      if (dataAtiv) {
+        const antes = faturasBrutas.filter(f => f.vencimento && f.vencimento < dataAtiv).length;
+        if (antes) faturasAntesAtivacao += antes;
+        faturasBrutas = faturasBrutas.filter(f => !(f.vencimento && f.vencimento < dataAtiv));
+      }
+      const faturas = faturasBrutas.slice(0, 4);
+      while (faturas.length < 4) faturas.push({status:'', vencimento:null, valor:null});
       const safraLabel = dataAtiv ? `${MESES[dataAtiv.getUTCMonth()]}/${dataAtiv.getUTCFullYear()}` : '';
       const cutoff = dataAtiv ? fmtDate(lastDayOfMonthPlus3(dataAtiv.getUTCMonth(), dataAtiv.getUTCFullYear())) : '';
 
@@ -845,6 +859,7 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
 
     log(logEl, `Cruzamento concluído: ${matched} de ${clientRows.length} encontraram fatura correspondente (${clientRows.length-matched} ainda sem fatura emitida).`, matched < clientRows.length ? 'warn' : 'ok');
     if (semData) log(logEl, `  ${semData} registros sem data de ativação identificável (safra/corte ficaram em branco).`, 'warn');
+    if (faturasAntesAtivacao) log(logEl, `  ${faturasAntesAtivacao} faturas descartadas por ter vencimento anterior à data de ativação do cliente.`, 'warn');
     log(logEl, `Portabilidade: ${portabilidadeRows.length} · Migração: ${migracaoRows.length}`, 'ok');
 
     const statsEl = document.getElementById('smb-stats');
