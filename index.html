@@ -485,7 +485,11 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
       const numeroLinhaRaw = c['NUMERO_LINHA'];
       const numeroLinha = (numeroLinhaRaw !== undefined && numeroLinhaRaw !== null && String(numeroLinhaRaw).trim() !== '') ? String(numeroLinhaRaw).trim() : '';
       const isPortabilidade = !!numeroLinha;
-      const fat = faturaMap[acesso];
+      // Tenta casar pela TELEFONE_PORTADO primeiro; se a portabilidade não foi
+      // concluída, a operadora fatura pela linha temporária (NUMERO_LINHA),
+      // então cai para esse número como fallback.
+      let fat = faturaMap[acesso];
+      if (!fat && numeroLinha) fat = faturaMap[numeroLinha];
       if (fat) matched++;
       const faturas = fat ? extractFaturas(fat) : extractFaturas({});
 
