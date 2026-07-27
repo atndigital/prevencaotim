@@ -205,6 +205,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="pm">Portabilidade / Migração</div>
     <div class="tab" data-tab="fibra">Ultrafibra</div>
+    <div class="tab" data-tab="smb">Inadimplência SMB</div>
   </div>
 
   <!-- ================= PORTABILIDADE / MIGRAÇÃO ================= -->
@@ -296,6 +297,40 @@
 
   </div>
 
+  <!-- ================= INADIMPLÊNCIA SMB ================= -->
+  <div class="panel" id="panel-smb">
+
+    <div class="card">
+      <h2>1. Arquivos</h2>
+      <p class="note" style="margin:0 0 14px">Inadimplência SMB não é separada por safra — suba a base toda de uma vez. A safra de cada cliente é calculada automaticamente pela data de ativação, e a data de corte é o último dia de (mês de ativação do cliente + 3).</p>
+      <div class="row">
+        <div class="field">
+          <label>Relatório de Inadimplência (.xlsx — aba DadosRadar)</label>
+          <div class="upload-box" id="smb-box-fatura">
+            <input type="file" id="smb-file-fatura" accept=".xlsx,.xls">
+            <div class="fname" id="smb-fname-fatura"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Arquivo de clientes / conectadas (.xls ou .xlsx)</label>
+          <div class="upload-box" id="smb-box-cliente">
+            <input type="file" id="smb-file-cliente" accept=".xls,.xlsx">
+            <div class="fname" id="smb-fname-cliente"></div>
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="smb-btn" disabled>Processar SMB</button>
+      <div class="log" id="smb-log"></div>
+    </div>
+
+    <div class="card hidden" id="smb-results">
+      <h2>2. Resultado</h2>
+      <div class="stats" id="smb-stats"></div>
+      <div class="downloads" id="smb-downloads"></div>
+    </div>
+
+  </div>
+
 </div>
 
 <script>
@@ -370,6 +405,54 @@ function extractFaturas(row, n) {
       vencimento: parseBRDate(row[`${suf} fatura - Data de vencimento`]),
       valor: parsePrice(row[`${suf} fatura - Preço da fatura`]),
       diasAtraso: row[`${suf} fatura - Dias de atraso`] !== undefined && row[`${suf} fatura - Dias de atraso`] !== '' ? parseFloat(row[`${suf} fatura - Dias de atraso`]) : null,
+    });
+  }
+  return out;
+}
+// O Relatório de Inadimplência (Radar) guarda as datas como número serial do
+// Excel em formato "General" (não como data), então o SheetJS não converte
+// automaticamente — precisamos converter manualmente. Época do Excel: 1899-12-30.
+function excelSerialToDate(serial) {
+  const n = Number(serial);
+  if (serial === null || serial === undefined || serial === '' || isNaN(n) || n <= 0) return null;
+  const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+  return isNaN(d) ? null : d;
+}
+// Normaliza um valor de acesso (pode vir como número do Excel) para string de dígitos.
+function normalizeAcesso(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'number') return String(Math.trunc(v));
+  return String(v).trim();
+}
+// Extrai até n faturas do formato do Relatório de Inadimplência (Radar), que usa
+// NB_VLR_FATURA_i / dat_vencimento_faturai / dat_pg_faturai / dias_atraso_faturai /
+// tipo_pgto_faturai (esse último só existe para as faturas 1 e 2 no export).
+function extractFaturasRadar(row, n) {
+  const count = n || 4;
+  const out = [];
+  for (let i=1;i<=count;i++) {
+    const venc = excelSerialToDate(row[`dat_vencimento_fatura${i}`]);
+    const pago = excelSerialToDate(row[`dat_pg_fatura${i}`]);
+    const diasAtrasoRaw = row[`dias_atraso_fatura${i}`];
+    const diasAtraso = (diasAtrasoRaw !== undefined && diasAtrasoRaw !== '' && !isNaN(diasAtrasoRaw)) ? parseFloat(diasAtrasoRaw) : null;
+    const tipoPgto = row[`tipo_pgto_fatura${i}`];
+
+    let status = '';
+    if (pago) {
+      status = 'Paga';
+    } else if (tipoPgto) {
+      const t = String(tipoPgto).trim();
+      if (t.startsWith('02')) status = 'Paga';
+      else if (t.startsWith('01')) status = 'Parcial';
+      else if (t.startsWith('00')) status = diasAtraso && diasAtraso > 0 ? 'Em aberto' : 'Aberta';
+    } else if (venc) {
+      status = diasAtraso && diasAtraso > 0 ? 'Em aberto' : 'Aberta';
+    }
+
+    out.push({
+      status: status,
+      vencimento: venc,
+      valor: parsePrice(row[`NB_VLR_FATURA_${i}`]),
     });
   }
   return out;
@@ -682,6 +765,121 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
     console.error(err);
   } finally {
     btn.disabled = false; btn.textContent = 'Processar Fibra';
+  }
+});
+
+// ================= INADIMPLÊNCIA SMB =================
+let smbFaturaFile = null, smbClienteFile = null;
+wireUpload('smb-file-fatura','smb-box-fatura','smb-fname-fatura', checkSmbReady);
+wireUpload('smb-file-cliente','smb-box-cliente','smb-fname-cliente', checkSmbReady);
+function checkSmbReady() {
+  smbFaturaFile = document.getElementById('smb-file-fatura').files[0];
+  smbClienteFile = document.getElementById('smb-file-cliente').files[0];
+  document.getElementById('smb-btn').disabled = !(smbFaturaFile && smbClienteFile);
+}
+
+document.getElementById('smb-btn').addEventListener('click', async () => {
+  const logEl = document.getElementById('smb-log');
+  clearLog(logEl);
+  document.getElementById('smb-results').classList.add('hidden');
+  const btn = document.getElementById('smb-btn');
+  btn.disabled = true; btn.textContent = 'Processando...';
+
+  try {
+    log(logEl, `Lendo Relatório de Inadimplência...`);
+    const faturaRows = await parseWorkbookFirstSheet(smbFaturaFile);
+    if (!faturaRows.length || !('ST_ACESSO' in faturaRows[0])) {
+      throw new Error('O arquivo não parece ter a coluna "ST_ACESSO". Confira se é o export correto (aba DadosRadar).');
+    }
+    const faturaMap = {};
+    for (const r of faturaRows) {
+      const acesso = normalizeAcesso(r['ST_ACESSO']);
+      if (acesso) faturaMap[acesso] = r;
+    }
+    log(logEl, `  ${faturaRows.length} linhas de fatura carregadas (${Object.keys(faturaMap).length} acessos únicos).`, 'ok');
+
+    log(logEl, `Lendo arquivo de clientes...`);
+    const clientRows = await parseWorkbookFirstSheet(smbClienteFile);
+    if (!clientRows.length || !('CPF' in clientRows[0]) || !('DATA_ATIVACAO' in clientRows[0])) {
+      throw new Error('O arquivo de clientes não parece ter as colunas CPF/DATA_ATIVACAO esperadas.');
+    }
+    log(logEl, `  ${clientRows.length} linhas de clientes carregadas. Não separa por safra — processando tudo junto.`, 'ok');
+
+    const portabilidadeRows = [], migracaoRows = [];
+    let matched = 0, semData = 0;
+    for (const c of clientRows) {
+      const acesso = String(c['TELEFONE_PORTADO']||'').trim();
+      const numeroLinhaRaw = c['NUMERO_LINHA'];
+      const numeroLinha = (numeroLinhaRaw !== undefined && numeroLinhaRaw !== null && String(numeroLinhaRaw).trim() !== '') ? String(numeroLinhaRaw).trim() : '';
+      const isPortabilidade = !!numeroLinha;
+      // Mesma lógica de fallback da aba Portabilidade/Migração: tenta pelo número
+      // portado, e se não achar, tenta pela linha temporária.
+      let fat = faturaMap[acesso];
+      if (!fat && numeroLinha) fat = faturaMap[numeroLinha];
+      if (fat) matched++;
+      const faturas = fat ? extractFaturasRadar(fat) : extractFaturasRadar({});
+
+      // Safra e data de corte calculadas por cliente (não há seleção manual):
+      // safra = mês/ano da própria DATA_ATIVACAO; corte = último dia desse mês + 3.
+      const dataAtiv = c['DATA_ATIVACAO'] instanceof Date && !isNaN(c['DATA_ATIVACAO']) ? c['DATA_ATIVACAO'] : null;
+      if (!dataAtiv) semData++;
+      const safraLabel = dataAtiv ? `${MESES[dataAtiv.getUTCMonth()]}/${dataAtiv.getUTCFullYear()}` : '';
+      const cutoff = dataAtiv ? fmtDate(lastDayOfMonthPlus3(dataAtiv.getUTCMonth(), dataAtiv.getUTCFullYear())) : '';
+
+      const row = {
+        cpf: padCpf(c['CPF']),
+        nome: c['NOME'] || '',
+        data_ativacao: dataAtiv ? fmtDate(dataAtiv) : '',
+        safra: safraLabel,
+        produto: isPortabilidade ? 'Portabilidade' : 'Migração',
+        portabilidade: isPortabilidade ? portabilidadeStatus(c['PORTABILIDADE']) : '',
+        numero_portado: isPortabilidade ? acesso : '',
+        numero_linha: isPortabilidade ? numeroLinha : '',
+        acesso: acesso,
+        status_do_acesso: '',
+        ...faturaFieldsToRow(faturas),
+        data_corte: cutoff,
+      };
+      (isPortabilidade ? portabilidadeRows : migracaoRows).push(row);
+    }
+
+    log(logEl, `Cruzamento concluído: ${matched} de ${clientRows.length} encontraram fatura correspondente (${clientRows.length-matched} ainda sem fatura emitida).`, matched < clientRows.length ? 'warn' : 'ok');
+    if (semData) log(logEl, `  ${semData} registros sem data de ativação identificável (safra/corte ficaram em branco).`, 'warn');
+    log(logEl, `Portabilidade: ${portabilidadeRows.length} · Migração: ${migracaoRows.length}`, 'ok');
+
+    const statsEl = document.getElementById('smb-stats');
+    statsEl.innerHTML = '';
+    const stats = [
+      [clientRows.length, 'Total processado'],
+      [portabilidadeRows.length, 'Portabilidade'],
+      [migracaoRows.length, 'Migração'],
+      [clientRows.length-matched, 'Sem fatura ainda'],
+    ];
+    stats.forEach(([n,l],i) => {
+      const d = document.createElement('div');
+      d.className = 'stat' + (i<3?' accent':' amber');
+      d.innerHTML = `<div class="n">${n}</div><div class="l">${l}</div>`;
+      statsEl.appendChild(d);
+    });
+
+    const dlEl = document.getElementById('smb-downloads');
+    dlEl.innerHTML = '';
+    const today = fmtDate(new Date()).replace(/\//g,'-');
+    if (portabilidadeRows.length) {
+      const blob = buildXlsxBlob(portabilidadeRows, FATURA_COLS);
+      makeDownloadButton(dlEl, `Portabilidade SMB`, blob, `portabilidade_smb_${today}.xlsx`, portabilidadeRows.length);
+    }
+    if (migracaoRows.length) {
+      const blob = buildXlsxBlob(migracaoRows, FATURA_COLS);
+      makeDownloadButton(dlEl, `Migração SMB`, blob, `migracao_smb_${today}.xlsx`, migracaoRows.length);
+    }
+    document.getElementById('smb-results').classList.remove('hidden');
+
+  } catch (err) {
+    log(logEl, 'Erro: ' + err.message, 'err');
+    console.error(err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Processar SMB';
   }
 });
 </script>
