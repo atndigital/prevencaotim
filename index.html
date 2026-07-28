@@ -605,6 +605,15 @@ function isFaturaAbertaVencida(f, hoje) {
   const t = normalizeText(f.status);
   return t.includes('abert') && f.vencimento < hoje;
 }
+// Monta o telefone de contato da Fibra a partir do DDD + Telefone (colunas
+// separadas no arquivo de vendas). "Numero OS" NÃO é telefone — é o número da
+// ordem de serviço/contrato, usado só para casar com a fatura.
+function fibraPhone(ddd, tel) {
+  const d = String(ddd||'').replace(/\D/g,'');
+  const t = String(tel||'').replace(/\D/g,'');
+  if (!t) return '';
+  return d + t;
+}
 function makeDownloadButton(container, label, blob, filename, count) {
   const a = document.createElement('a');
   a.className = 'dl-btn';
@@ -886,7 +895,9 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
       const ativo = normalizeText(statusAcesso) === 'ativo';
       const abertasVencidas = faturasTodas.filter(f => isFaturaAbertaVencida(f, hoje));
       if (ativo && abertasVencidas.length) {
-        fibraDiscador.push([cpf, os, nome, os]);
+        const telefone1 = fibraPhone(c['DDD'], c['Telefone']);
+        const telefone2 = fibraPhone(c['DDD_1'], c['Telefone_1']);
+        fibraDiscador.push([cpf, telefone1, nome, telefone2]);
         abertasVencidas.forEach(f => resumoAdd('Fibra', cpf, fmtDate(f.vencimento)));
       }
     }
