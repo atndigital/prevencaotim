@@ -375,15 +375,6 @@ const FATURA_COLS = ['cpf','nome','data_ativacao','safra','produto','portabilida
   'status_fatura_3','vencimento_fatura_3','valor_fatura_3',
   'status_fatura_4','vencimento_fatura_4','valor_fatura_4',
   'data_corte'];
-// Fibra usa as mesmas colunas, mas com telefone1/telefone2 logo após "acesso" —
-// nessa base o "acesso" é o número da ordem de serviço, não um telefone, então
-// sem essas colunas o arquivo principal não tem nenhum jeito de ligar pro cliente.
-const FATURA_COLS_FIBRA = ['cpf','nome','data_ativacao','safra','produto','portabilidade','numero_portado','numero_linha','acesso','telefone1','telefone2','status_do_acesso',
-  'status_fatura_1','vencimento_fatura_1','valor_fatura_1',
-  'status_fatura_2','vencimento_fatura_2','valor_fatura_2',
-  'status_fatura_3','vencimento_fatura_3','valor_fatura_3',
-  'status_fatura_4','vencimento_fatura_4','valor_fatura_4',
-  'data_corte'];
 
 // ---------- resumo de inadimplência (acumulado entre as abas) ----------
 const PRODUTOS_RESUMO = ['Portabilidade','Migração','Fibra','Portabilidade SMB','Migração SMB'];
@@ -895,10 +886,8 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
         produto: 'Fibra',
         portabilidade: 'Não',
         numero_portado: '',
-        numero_linha: '',
+        numero_linha: telefone1,
         acesso: os,
-        telefone1: telefone1,
-        telefone2: telefone2,
         status_do_acesso: statusAcesso,
         ...faturaFieldsToRow(faturasDisplay),
         data_corte: dataCorte,
@@ -934,7 +923,7 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
     const dlEl = document.getElementById('fb-downloads');
     dlEl.innerHTML = '';
     if (outRows.length) {
-      const blob = buildXlsxBlob(outRows, FATURA_COLS_FIBRA);
+      const blob = buildXlsxBlob(outRows, FATURA_COLS);
       const today = new Date();
       makeDownloadButton(dlEl, 'Fibra — base completa', blob, `fibra_${fmtDate(today).replace(/\//g,'-')}.xlsx`, outRows.length);
     }
