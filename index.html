@@ -189,6 +189,11 @@
     padding-left: 10px;
   }
   .hidden { display: none; }
+  .resumo-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .resumo-table th, .resumo-table td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--line); }
+  .resumo-table th:first-child, .resumo-table td:first-child { text-align: left; }
+  .resumo-table thead th { color: var(--muted); font-weight: 600; border-bottom: 2px solid var(--line); }
+  .resumo-table tr.total-row td { border-top: 2px solid var(--line); border-bottom: none; }
 </style>
 </head>
 <body>
@@ -206,6 +211,7 @@
     <div class="tab active" data-tab="pm">Portabilidade / Migração</div>
     <div class="tab" data-tab="fibra">Ultrafibra</div>
     <div class="tab" data-tab="smb">Inadimplência SMB</div>
+    <div class="tab" data-tab="resumo">Resumo Inadimplência</div>
   </div>
 
   <!-- ================= PORTABILIDADE / MIGRAÇÃO ================= -->
@@ -331,6 +337,18 @@
 
   </div>
 
+  <!-- ================= RESUMO INADIMPLÊNCIA ================= -->
+  <div class="panel" id="panel-resumo">
+
+    <div class="card">
+      <h2>Resumo de clientes inadimplentes por produto e vencimento</h2>
+      <p class="note" style="margin:0 0 14px">Conta clientes com pelo menos 1 fatura <strong>aberta e vencida</strong>, agrupados por produto e por data de vencimento da fatura. Os dados são acumulados conforme você processa cada aba (Portabilidade/Migração, Ultrafibra, Inadimplência SMB) — processe as abas que quiser incluir antes de olhar aqui.</p>
+      <div class="downloads" id="resumo-downloads"></div>
+      <div id="resumo-content" style="margin-top:16px"></div>
+    </div>
+
+  </div>
+
 </div>
 
 <script>
@@ -358,12 +376,80 @@ const FATURA_COLS = ['cpf','nome','data_ativacao','safra','produto','portabilida
   'status_fatura_4','vencimento_fatura_4','valor_fatura_4',
   'data_corte'];
 
+// ---------- resumo de inadimplência (acumulado entre as abas) ----------
+const PRODUTOS_RESUMO = ['Portabilidade','Migração','Fibra','Portabilidade SMB','Migração SMB'];
+const RESUMO = {};
+PRODUTOS_RESUMO.forEach(p => RESUMO[p] = []);
+function resumoClear(produto) { RESUMO[produto] = []; }
+function resumoAdd(produto, cpf, vencimentoStr) {
+  RESUMO[produto].push({cpf, vencimento: vencimentoStr});
+}
+function renderResumo() {
+  const el = document.getElementById('resumo-content');
+  const dl = document.getElementById('resumo-downloads');
+  // Coleta todas as datas de vencimento distintas, ordenadas.
+  const datasSet = new Set();
+  const produtosComDados = PRODUTOS_RESUMO.filter(p => RESUMO[p].length);
+  produtosComDados.forEach(p => RESUMO[p].forEach(r => datasSet.add(r.vencimento)));
+  if (!datasSet.size) {
+    el.innerHTML = '<p class="note" style="margin:0">Nenhum dado ainda. Processe alguma aba (Portabilidade/Migração, Ultrafibra ou Inadimplência SMB) primeiro.</p>';
+    dl.innerHTML = '';
+    return;
+  }
+  const datas = [...datasSet].sort((a,b) => {
+    const da = parseBRDate(a), db = parseBRDate(b);
+    return (da && db) ? da - db : a.localeCompare(b);
+  });
+  // Conta clientes distintos (cpf) por produto x data de vencimento.
+  const counts = {}; // counts[data][produto] = Set(cpf)
+  datas.forEach(d => { counts[d] = {}; produtosComDados.forEach(p => counts[d][p] = new Set()); });
+  produtosComDados.forEach(p => {
+    RESUMO[p].forEach(r => counts[r.vencimento][p].add(r.cpf));
+  });
+
+  let html = '<table class="resumo-table"><thead><tr><th>Vencimento</th>';
+  produtosComDados.forEach(p => html += `<th>${p}</th>`);
+  html += '<th>Total</th></tr></thead><tbody>';
+  const totalPorProduto = {}; produtosComDados.forEach(p => totalPorProduto[p] = new Set());
+  datas.forEach(d => {
+    html += `<tr><td>${d}</td>`;
+    let totalLinha = 0;
+    produtosComDados.forEach(p => {
+      const n = counts[d][p].size;
+      totalLinha += n;
+      counts[d][p].forEach(cpf => totalPorProduto[p].add(cpf));
+      html += `<td>${n || ''}</td>`;
+    });
+    html += `<td><strong>${totalLinha}</strong></td></tr>`;
+  });
+  html += '<tr class="total-row"><td>Total</td>';
+  let granTotal = 0;
+  produtosComDados.forEach(p => { granTotal += totalPorProduto[p].size; html += `<td><strong>${totalPorProduto[p].size}</strong></td>`; });
+  html += `<td><strong>${granTotal}</strong></td></tr>`;
+  html += '</tbody></table>';
+  el.innerHTML = html;
+
+  // Download do resumo em xlsx
+  dl.innerHTML = '';
+  const rows = datas.map(d => {
+    const row = {vencimento: d};
+    produtosComDados.forEach(p => row[p] = counts[d][p].size || 0);
+    row['Total'] = produtosComDados.reduce((s,p) => s + counts[d][p].size, 0);
+    return row;
+  });
+  const cols = ['vencimento', ...produtosComDados, 'Total'];
+  const blob = buildXlsxBlob(rows, cols);
+  const today = fmtDate(new Date()).replace(/\//g,'-');
+  makeDownloadButton(dl, 'Resumo inadimplência (XLSX)', blob, `resumo_inadimplencia_${today}.xlsx`, rows.length);
+}
+
 // ---------- tabs ----------
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
   document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'resumo') renderResumo();
 }));
 
 // ---------- helpers ----------
@@ -501,6 +587,24 @@ function buildXlsxBlob(rows, columns) {
   const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
   return new Blob([out], {type: 'application/octet-stream'});
 }
+// CSV sem cabeçalho, para importar no discador (Atto). Colunas: cpf/cnpj, telefone 1, nome, telefone 2.
+function csvEscape(v) {
+  const s = (v === null || v === undefined) ? '' : String(v);
+  if (/[",;\n\r]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+function buildDiscadorCsvBlob(rows) {
+  const lines = rows.map(r => r.map(csvEscape).join(';'));
+  const content = lines.join('\r\n');
+  return new Blob(['\uFEFF' + content], {type: 'text/csv;charset=utf-8'});
+}
+// Fatura "aberta e vencida": status indica não paga ("aberta"/"em aberto") e o
+// vencimento já passou.
+function isFaturaAbertaVencida(f, hoje) {
+  if (!f || !f.vencimento) return false;
+  const t = normalizeText(f.status);
+  return t.includes('abert') && f.vencimento < hoje;
+}
 function makeDownloadButton(container, label, blob, filename, count) {
   const a = document.createElement('a');
   a.className = 'dl-btn';
@@ -580,9 +684,12 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
     }
 
     const cutoff = fmtDate(lastDayOfMonthPlus3(safraMonth, safraYear));
+    const hoje = new Date(); hoje.setUTCHours(0,0,0,0);
 
     const portabilidadeRows = [], migracaoRows = [];
-    let matched = 0;
+    const portabilidadeDiscador = [], migracaoDiscador = [];
+    resumoClear('Portabilidade'); resumoClear('Migração');
+    let matched = 0, faturasAntesAtivacao = 0;
     for (const c of filtered) {
       const acesso = String(c['TELEFONE_PORTADO']||'').trim();
       const numeroLinhaRaw = c['NUMERO_LINHA'];
@@ -594,8 +701,20 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
       let fat = faturaMap[acesso];
       if (!fat && numeroLinha) fat = faturaMap[numeroLinha];
       if (fat) matched++;
-      const faturas = fat ? extractFaturas(fat) : extractFaturas({});
 
+      const dataAtiv = c['DATA_ATIVACAO'] instanceof Date && !isNaN(c['DATA_ATIVACAO']) ? c['DATA_ATIVACAO'] : null;
+      // Descarta faturas com vencimento anterior à data de ativação (cobrança de
+      // período antes da linha existir/ser portada não entra no relatório).
+      let faturasBrutas = fat ? extractFaturas(fat, 6) : [];
+      if (dataAtiv) {
+        const antes = faturasBrutas.filter(f => f.vencimento && f.vencimento < dataAtiv).length;
+        if (antes) faturasAntesAtivacao += antes;
+        faturasBrutas = faturasBrutas.filter(f => !(f.vencimento && f.vencimento < dataAtiv));
+      }
+      const faturas = faturasBrutas.slice(0, 4);
+      while (faturas.length < 4) faturas.push({status:'', vencimento:null, valor:null});
+
+      const statusAcesso = fat ? (fat['Status do número de acesso']||'') : '';
       const row = {
         cpf: padCpf(c['CPF']),
         nome: c['NOME'] || '',
@@ -606,14 +725,27 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
         numero_portado: isPortabilidade ? acesso : '',
         numero_linha: isPortabilidade ? numeroLinha : '',
         acesso: acesso,
-        status_do_acesso: fat ? (fat['Status do número de acesso']||'') : '',
+        status_do_acesso: statusAcesso,
         ...faturaFieldsToRow(faturas),
         data_corte: cutoff,
       };
       (isPortabilidade ? portabilidadeRows : migracaoRows).push(row);
+
+      // Base para o discador: status de acesso Ativo + pelo menos 1 fatura aberta e vencida.
+      const ativo = normalizeText(statusAcesso) === 'ativo';
+      const abertasVencidas = faturasBrutas.filter(f => isFaturaAbertaVencida(f, hoje));
+      if (ativo && abertasVencidas.length) {
+        const telefone1 = acesso;
+        const telefone2 = isPortabilidade ? numeroLinha : '';
+        const linha = [row.cpf, telefone1, row.nome, telefone2];
+        (isPortabilidade ? portabilidadeDiscador : migracaoDiscador).push(linha);
+        const produtoResumo = isPortabilidade ? 'Portabilidade' : 'Migração';
+        abertasVencidas.forEach(f => resumoAdd(produtoResumo, row.cpf, fmtDate(f.vencimento)));
+      }
     }
 
     log(logEl, `Cruzamento concluído: ${matched} de ${filtered.length} encontraram fatura correspondente (${filtered.length-matched} ainda sem fatura emitida).`, matched < filtered.length ? 'warn' : 'ok');
+    if (faturasAntesAtivacao) log(logEl, `  ${faturasAntesAtivacao} faturas descartadas por ter vencimento anterior à data de ativação do cliente.`, 'warn');
     log(logEl, `Portabilidade: ${portabilidadeRows.length} · Migração: ${migracaoRows.length}`, 'ok');
     log(logEl, `Data de corte da safra ${safraLabel}: ${cutoff}`, 'ok');
 
@@ -642,6 +774,14 @@ document.getElementById('pm-btn').addEventListener('click', async () => {
     if (migracaoRows.length) {
       const blob = buildXlsxBlob(migracaoRows, FATURA_COLS);
       makeDownloadButton(dlEl, `Migração — ${safraLabel}`, blob, `migracao_${MESES[safraMonth]}_${safraYear}.xlsx`, migracaoRows.length);
+    }
+    if (portabilidadeDiscador.length) {
+      const blob = buildDiscadorCsvBlob(portabilidadeDiscador);
+      makeDownloadButton(dlEl, `Discador Portabilidade (CSV)`, blob, `discador_portabilidade_${MESES[safraMonth]}_${safraYear}.csv`, portabilidadeDiscador.length);
+    }
+    if (migracaoDiscador.length) {
+      const blob = buildDiscadorCsvBlob(migracaoDiscador);
+      makeDownloadButton(dlEl, `Discador Migração (CSV)`, blob, `discador_migracao_${MESES[safraMonth]}_${safraYear}.csv`, migracaoDiscador.length);
     }
     document.getElementById('pm-results').classList.remove('hidden');
 
@@ -691,6 +831,9 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
     log(logEl, `  ${clientRows.length} linhas de vendas carregadas.`, 'ok');
 
     const outRows = [];
+    const fibraDiscador = [];
+    resumoClear('Fibra');
+    const hoje = new Date(); hoje.setUTCHours(0,0,0,0);
     let comCorte = 0;
     let semData = 0;
     for (const c of clientRows) {
@@ -721,9 +864,12 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
         comCorte++;
       }
 
+      const statusAcesso = fat['Status do número de acesso'] || '';
+      const cpf = padCpf(c['CPF']);
+      const nome = c['Cliente'] || '';
       outRows.push({
-        cpf: padCpf(c['CPF']),
-        nome: c['Cliente'] || '',
+        cpf: cpf,
+        nome: nome,
         data_ativacao: fmtDate(dataFinal),
         safra: safra,
         produto: 'Fibra',
@@ -731,10 +877,18 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
         numero_portado: '',
         numero_linha: '',
         acesso: os,
-        status_do_acesso: fat['Status do número de acesso'] || '',
+        status_do_acesso: statusAcesso,
         ...faturaFieldsToRow(faturasDisplay),
         data_corte: dataCorte,
       });
+
+      // Base para o discador: status de acesso Ativo + pelo menos 1 fatura aberta e vencida.
+      const ativo = normalizeText(statusAcesso) === 'ativo';
+      const abertasVencidas = faturasTodas.filter(f => isFaturaAbertaVencida(f, hoje));
+      if (ativo && abertasVencidas.length) {
+        fibraDiscador.push([cpf, os, nome, os]);
+        abertasVencidas.forEach(f => resumoAdd('Fibra', cpf, fmtDate(f.vencimento)));
+      }
     }
 
     log(logEl, `Cruzamento concluído: ${outRows.length} clientes Fibra com fatura encontrada.`, 'ok');
@@ -761,6 +915,11 @@ document.getElementById('fb-btn').addEventListener('click', async () => {
       const blob = buildXlsxBlob(outRows, FATURA_COLS);
       const today = new Date();
       makeDownloadButton(dlEl, 'Fibra — base completa', blob, `fibra_${fmtDate(today).replace(/\//g,'-')}.xlsx`, outRows.length);
+    }
+    if (fibraDiscador.length) {
+      const blob = buildDiscadorCsvBlob(fibraDiscador);
+      const today = new Date();
+      makeDownloadButton(dlEl, 'Discador Fibra (CSV)', blob, `discador_fibra_${fmtDate(today).replace(/\//g,'-')}.csv`, fibraDiscador.length);
     }
     document.getElementById('fb-results').classList.remove('hidden');
 
@@ -810,7 +969,10 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
     log(logEl, `  ${clientRows.length} linhas de clientes carregadas. Não separa por safra — processando tudo junto.`, 'ok');
 
     const portabilidadeRows = [], migracaoRows = [];
+    const portabilidadeDiscador = [], migracaoDiscador = [];
+    resumoClear('Portabilidade SMB'); resumoClear('Migração SMB');
     let matched = 0, semData = 0, faturasAntesAtivacao = 0;
+    const hoje = new Date(); hoje.setUTCHours(0,0,0,0);
     for (const c of clientRows) {
       const acesso = String(c['TELEFONE_PORTADO']||'').trim();
       const numeroLinhaRaw = c['NUMERO_LINHA'];
@@ -855,6 +1017,18 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
         data_corte: cutoff,
       };
       (isPortabilidade ? portabilidadeRows : migracaoRows).push(row);
+
+      // Base para o discador: essa base não tem campo de status de acesso, então
+      // considera todo mundo que casou com fatura, com pelo menos 1 fatura aberta e vencida.
+      const abertasVencidas = faturasBrutas.filter(f => isFaturaAbertaVencida(f, hoje));
+      if (abertasVencidas.length) {
+        const telefone1 = acesso;
+        const telefone2 = isPortabilidade ? numeroLinha : '';
+        const linha = [row.cpf, telefone1, row.nome, telefone2];
+        (isPortabilidade ? portabilidadeDiscador : migracaoDiscador).push(linha);
+        const produtoResumo = isPortabilidade ? 'Portabilidade SMB' : 'Migração SMB';
+        abertasVencidas.forEach(f => resumoAdd(produtoResumo, row.cpf, fmtDate(f.vencimento)));
+      }
     }
 
     log(logEl, `Cruzamento concluído: ${matched} de ${clientRows.length} encontraram fatura correspondente (${clientRows.length-matched} ainda sem fatura emitida).`, matched < clientRows.length ? 'warn' : 'ok');
@@ -887,6 +1061,10 @@ document.getElementById('smb-btn').addEventListener('click', async () => {
     if (migracaoRows.length) {
       const blob = buildXlsxBlob(migracaoRows, FATURA_COLS);
       makeDownloadButton(dlEl, `Migração SMB`, blob, `migracao_smb_${today}.xlsx`, migracaoRows.length);
+    }
+    if (portabilidadeDiscador.length) {
+      const blob = buildDiscadorCsvBlob(portabilidadeDiscador);
+      makeDownloadButton(dlEl, `Discador Portabilidade SMB (CSV)`, blob, `discador_portabilidade_smb_${today}.csv`, portabilidadeDiscador.length);
     }
     document.getElementById('smb-results').classList.remove('hidden');
 
